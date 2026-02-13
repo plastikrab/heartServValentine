@@ -2,124 +2,166 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Heart Physics Engine</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neural Affective Interface</title>
     <style>
+        :root {
+            --primary: #ff2d55;
+            --bg: #08080c;
+        }
+
         body {
             margin: 0;
             padding: 0;
-            background-color: #050505;
+            background-color: var(--bg);
             color: #ffffff;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
             overflow: hidden;
             display: flex;
             justify-content: center;
             align-items: center;
             height: 100vh;
-            cursor: crosshair;
+            touch-action: none; /* Предотвращаем стандартные жесты браузера */
         }
 
         canvas {
             display: block;
+            filter: blur(0.4px);
         }
 
-        .ui-overlay {
+        .interface {
             position: absolute;
-            bottom: 30px;
-            text-align: center;
+            top: env(safe-area-inset-top, 20px);
+            left: 20px;
             pointer-events: none;
+            border-left: 2px solid var(--primary);
+            padding-left: 15px;
+            background: rgba(8, 8, 12, 0.4);
+            backdrop-filter: blur(4px);
             z-index: 10;
         }
 
-        .title {
-            font-size: 0.9rem;
-            letter-spacing: 0.2rem;
-            text-transform: uppercase;
+        .stats {
+            font-size: 10px;
             color: rgba(255, 255, 255, 0.4);
-            margin-bottom: 8px;
+            line-height: 1.6;
+            text-transform: uppercase;
         }
 
-        .status {
-            font-family: monospace;
-            font-size: 0.8rem;
-            color: #ff2d55;
-            animation: blink 1s step-end infinite;
+        .status-active {
+            color: var(--primary);
+            font-weight: bold;
         }
 
-        @keyframes blink {
-            50% { opacity: 0; }
+        .hint {
+            position: absolute;
+            bottom: calc(30px + env(safe-area-inset-bottom));
+            font-size: 10px;
+            letter-spacing: 1px;
+            color: rgba(255, 255, 255, 0.3);
+            text-align: center;
+            width: 100%;
+            pointer-events: none;
+        }
+
+        #click-indicator {
+            position: absolute;
+            color: var(--primary);
+            pointer-events: none;
+            font-size: 12px;
+            font-weight: bold;
+            transform: translate(-50%, -50%);
+            display: none;
+            white-space: nowrap;
         }
     </style>
 </head>
 <body>
 
-    <div class="ui-overlay">
-        <div class="title">Conceptual Affect Engine</div>
-        <div class="status">> system.status: infinite_loop_detected</div>
+    <div class="interface">
+        <div class="stats">
+            ID: <span class="status-active">CORE_AFFECTION_01</span><br>
+            NET_STATUS: SYNCHRONIZED<br>
+            LOAD: <span id="load-val">14</span>%<br>
+            BUFFER: STABLE<br>
+            EMOTION_LOG: [CONNECTED]
+        </div>
     </div>
 
-    <canvas id="heartCanvas"></canvas>
+    <div class="hint">TOUCH TO INTERACT / TAP TO OVERLOAD</div>
+    <div id="click-indicator">SYSTEM OVERLOAD</div>
+
+    <canvas id="neuralCanvas"></canvas>
 
     <script>
-        const canvas = document.getElementById('heartCanvas');
+        const canvas = document.getElementById('neuralCanvas');
         const ctx = canvas.getContext('2d');
+        const loadLabel = document.getElementById('load-val');
+        const dpr = window.devicePixelRatio || 1;
 
         let particles = [];
-        const particleCount = 1200;
-        const mouse = { x: -1000, y: -1000, radius: 100 };
+        const particleCount = window.innerWidth < 600 ? 120 : 180; // Меньше частиц на мобилках для FPS
+        const connectionDist = window.innerWidth < 600 ? 80 : 110;
+        const mouse = { x: -2000, y: -2000, radius: window.innerWidth < 600 ? 100 : 150 };
+        let isOverload = false;
+        let overloadTimer = 0;
 
         function initCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            canvas.style.width = window.innerWidth + 'px';
+            canvas.style.height = window.innerHeight + 'px';
+            ctx.scale(dpr, dpr);
         }
 
-        // Математическая формула сердца
-        // x = 16sin^3(t)
-        // y = 13cos(t) - 5cos(2t) - 2cos(3t) - cos(4t)
         function getHeartPoint(t) {
-            const scale = Math.min(canvas.width, canvas.height) / 40;
+            // Адаптивный масштаб: сердце не должно вылезать за края на узких экранах
+            const baseScale = Math.min(window.innerWidth, window.innerHeight);
+            const scale = window.innerWidth < 600 ? baseScale / 35 : baseScale / 45;
+
             const x = 16 * Math.pow(Math.sin(t), 3);
             const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
             return {
-                x: x * scale + canvas.width / 2,
-                y: y * scale + canvas.height / 2
+                x: x * scale + window.innerWidth / 2,
+                y: y * scale + window.innerHeight / 2
             };
         }
 
-        class Particle {
-            constructor(targetX, targetY) {
-                this.originX = targetX;
-                this.originY = targetY;
-                this.x = Math.random() * canvas.width;
-                this.y = Math.random() * canvas.height;
-                this.vx = 0;
-                this.vy = 0;
-                this.accX = 0;
-                this.accY = 0;
-                this.friction = 0.92;
-                this.springFactor = 0.05;
-                this.size = Math.random() * 2 + 1;
-                this.color = Math.random() > 0.1 ? '#ff2d55' : '#ffffff';
+        class Node {
+            constructor(tx, ty) {
+                this.originX = tx;
+                this.originY = ty;
+                this.x = Math.random() * window.innerWidth;
+                this.y = Math.random() * window.innerHeight;
+                this.vx = (Math.random() - 0.5) * 2;
+                this.vy = (Math.random() - 0.5) * 2;
+                this.friction = 0.94;
+                this.spring = 0.025;
+                this.size = 1.2;
             }
 
             update() {
-                // Возврат к начальной точке (пружинная физика)
-                this.accX = (this.originX - this.x) * this.springFactor;
-                this.accY = (this.originY - this.y) * this.springFactor;
+                let dx = this.originX - this.x;
+                let dy = this.originY - this.y;
 
-                // Взаимодействие с мышью
-                const dx = this.x - mouse.x;
-                const dy = this.y - mouse.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
+                this.vx += dx * this.spring;
+                this.vy += dy * this.spring;
 
-                if (dist < mouse.radius) {
-                    const force = (mouse.radius - dist) / mouse.radius;
-                    this.accX += dx * force * 0.5;
-                    this.accY += dy * force * 0.5;
+                let mdx = this.x - mouse.x;
+                let mdy = this.y - mouse.y;
+                let mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+
+                if (mdist < mouse.radius) {
+                    let force = (mouse.radius - mdist) / mouse.radius;
+                    this.vx += mdx * force * 1.2;
+                    this.vy += mdy * force * 1.2;
                 }
 
-                this.vx += this.accX;
-                this.vy += this.accY;
+                if (isOverload) {
+                    this.vx += (Math.random() - 0.5) * 6;
+                    this.vy += (Math.random() - 0.5) * 6;
+                }
+
                 this.vx *= this.friction;
                 this.vy *= this.friction;
                 this.x += this.vx;
@@ -127,7 +169,7 @@
             }
 
             draw() {
-                ctx.fillStyle = this.color;
+                ctx.fillStyle = isOverload ? '#ffffff' : '#ff2d55';
                 ctx.beginPath();
                 ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
                 ctx.fill();
@@ -138,49 +180,101 @@
             initCanvas();
             particles = [];
             for (let i = 0; i < particleCount; i++) {
-                const t = Math.random() * Math.PI * 2;
-                const point = getHeartPoint(t);
-                // Добавляем немного случайного смещения к точкам сердца для объема
-                const jitter = 5;
-                particles.push(new Particle(
-                    point.x + (Math.random() - 0.5) * jitter,
-                    point.y + (Math.random() - 0.5) * jitter
-                ));
+                let t = (i / particleCount) * Math.PI * 2;
+                let point = getHeartPoint(t);
+
+                if (i % 3 === 0) {
+                    let r = Math.random();
+                    point.x = (point.x - window.innerWidth/2) * r + window.innerWidth/2;
+                    point.y = (point.y - window.innerHeight/2) * r + window.innerHeight/2;
+                }
+
+                particles.push(new Node(point.x, point.y));
+            }
+        }
+
+        function drawLines() {
+            for (let i = 0; i < particles.length; i++) {
+                for (let j = i + 1; j < particles.length; j++) {
+                    let dx = particles[i].x - particles[j].x;
+                    let dy = particles[i].y - particles[j].y;
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < connectionDist) {
+                        ctx.beginPath();
+                        ctx.strokeStyle = isOverload
+                            ? `rgba(255, 255, 255, ${1 - dist / connectionDist})`
+                            : `rgba(255, 45, 85, ${0.35 * (1 - dist / connectionDist)})`;
+                        ctx.lineWidth = 0.5;
+                        ctx.moveTo(particles[i].x, particles[i].y);
+                        ctx.lineTo(particles[j].x, particles[j].y);
+                        ctx.stroke();
+                    }
+                }
             }
         }
 
         function animate() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'rgba(8, 8, 12, 0.2)';
+            ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
 
-            // Легкое свечение
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = '#ff2d55';
+            drawLines();
 
             particles.forEach(p => {
                 p.update();
                 p.draw();
             });
 
+            if (isOverload) {
+                overloadTimer--;
+                loadLabel.innerText = Math.floor(Math.random() * 50) + 120;
+                if (overloadTimer <= 0) isOverload = false;
+            } else {
+                loadLabel.innerText = Math.floor(Math.random() * 5) + 14;
+            }
+
             requestAnimationFrame(animate);
         }
 
-        window.addEventListener('mousemove', (e) => {
-            mouse.x = e.clientX;
-            mouse.y = e.clientY;
+        // Обработка ввода (Мышь + Тач)
+        function updatePointer(x, y) {
+            mouse.x = x;
+            mouse.y = y;
+        }
+
+        window.addEventListener('mousemove', (e) => updatePointer(e.clientX, e.clientY));
+
+        window.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            updatePointer(touch.clientX, touch.clientY);
+
+            // Триггер перегрузки при быстром тапе
+            isOverload = true;
+            overloadTimer = 40;
+
+            const indicator = document.getElementById('click-indicator');
+            indicator.style.left = touch.clientX + 'px';
+            indicator.style.top = (touch.clientY - 40) + 'px';
+            indicator.style.display = 'block';
+            setTimeout(() => indicator.style.display = 'none', 600);
         });
 
-        window.addEventListener('resize', setup);
-
-        // Touch events для мобилок
-        window.addEventListener('touchstart', (e) => {
-            mouse.x = e.touches[0].clientX;
-            mouse.y = e.touches[0].clientY;
+        window.addEventListener('touchmove', (e) => {
+            const touch = e.touches[0];
+            updatePointer(touch.clientX, touch.clientY);
         });
 
         window.addEventListener('touchend', () => {
-            mouse.x = -1000;
-            mouse.y = -1000;
+            mouse.x = -2000;
+            mouse.y = -2000;
         });
+
+        window.addEventListener('mousedown', () => {
+            isOverload = true;
+            overloadTimer = 50;
+        });
+
+        window.addEventListener('resize', setup);
 
         window.onload = () => {
             setup();
